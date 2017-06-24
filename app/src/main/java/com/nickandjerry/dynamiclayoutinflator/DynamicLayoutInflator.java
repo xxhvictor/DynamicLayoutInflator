@@ -3,26 +3,29 @@ package com.nickandjerry.dynamiclayoutinflator;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
-import android.support.annotation.Nullable;
 import android.text.InputType;
 import android.text.TextUtils;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
+import android.view.ViewGroup.LayoutParams;
+import android.widget.AbsSeekBar;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
@@ -40,10 +43,12 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -118,6 +123,7 @@ public class DynamicLayoutInflator {
     public static View inflateName(Context context, String name) {
         return inflateName(context, name, null);
     }
+
     public static View inflateName(Context context, String name, ViewGroup parent) {
         if (name.startsWith("<")) {
             // Assume it's XML
@@ -167,6 +173,7 @@ public class DynamicLayoutInflator {
     public static View inflate(Context context, InputStream inputStream) {
         return inflate(context, inputStream, null);
     }
+
     public static View inflate(Context context, InputStream inputStream, ViewGroup parent) {
         try {
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -193,6 +200,7 @@ public class DynamicLayoutInflator {
     }
     public static View inflate(Context context, Node node, ViewGroup parent) {
         View mainView = getViewForName(context, node.getNodeName());
+        setDefaultLayoutParams(mainView);
         if (parent != null) parent.addView(mainView); // have to add to parent to enable certain layout attrs
         applyAttributes(mainView, getAttributesMap(node), parent);
         if (mainView instanceof ViewGroup && node.hasChildNodes()) {
@@ -200,6 +208,36 @@ public class DynamicLayoutInflator {
         }
         return mainView;
     }
+
+    private static void setDefaultLayoutParams(View view) {
+        ViewGroup.LayoutParams layoutParams = view.getLayoutParams();
+        if (layoutParams == null){
+            if(view instanceof LinearLayout) {
+                LinearLayout.LayoutParams newParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.MATCH_PARENT);
+                view.setLayoutParams(newParams);
+            } else if (view instanceof RelativeLayout) {
+                RelativeLayout.LayoutParams newParams = new RelativeLayout.LayoutParams(
+                        RelativeLayout.LayoutParams.MATCH_PARENT,
+                        RelativeLayout.LayoutParams.MATCH_PARENT);
+                view.setLayoutParams(newParams);
+            } else if (view instanceof FrameLayout) {
+                FrameLayout.LayoutParams newParams = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT);
+                view.setLayoutParams(newParams);
+            } else {
+                // default action
+                ViewGroup.LayoutParams newParams = new ViewGroup.LayoutParams(
+                        LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+                view.setLayoutParams(newParams);
+            }
+        }
+
+        assert  view.getLayoutParams() != null;
+    }
+
 
     private static void parseChildren(Context context, Node node, ViewGroup mainView) {
         NodeList nodeList = node.getChildNodes();
@@ -213,7 +251,11 @@ public class DynamicLayoutInflator {
     private static View getViewForName(Context context, String name) {
         try {
             if (!name.contains(".")) {
-                name = "android.widget." + name;
+                if (name.equals("View") || name.equals("ViewGroup")) {
+                    name = "android.view." + name;
+                } else {
+                    name = "android.widget." + name;
+                }
             }
             Class<?> clazz = Class.forName(name);
             Constructor<?> constructor = clazz.getConstructor(Context.class);
@@ -251,7 +293,7 @@ public class DynamicLayoutInflator {
         ViewGroup.LayoutParams layoutParams = view.getLayoutParams();
         int layoutRule;
         int marginLeft = 0, marginRight = 0, marginTop = 0, marginBottom = 0,
-        paddingLeft = 0, paddingRight = 0, paddingTop = 0, paddingBottom = 0;
+                paddingLeft = 0, paddingRight = 0, paddingTop = 0, paddingBottom = 0;
         boolean hasCornerRadius = false, hasCornerRadii = false;
         for (Map.Entry<String,String> entry : attrs.entrySet()) {
             String attr = entry.getKey();
@@ -326,10 +368,12 @@ public class DynamicLayoutInflator {
                     layoutRule = RelativeLayout.ABOVE;
                     layoutTarget = true;
                     break;
+                case "layout_toStartOf":
                 case "layout_toLeftOf":
                     layoutRule = RelativeLayout.LEFT_OF;
                     layoutTarget = true;
                     break;
+                case "layout_toEndOf":
                 case "layout_toRightOf":
                     layoutRule = RelativeLayout.RIGHT_OF;
                     layoutTarget = true;
@@ -379,12 +423,14 @@ public class DynamicLayoutInflator {
                     marginLeft = marginRight = marginTop = marginBottom = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics());
                     break;
                 case "layout_marginLeft":
+                case "layout_marginStart":
                     marginLeft = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics(), parent, true);
                     break;
                 case "layout_marginTop":
                     marginTop = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics(), parent, false);
                     break;
                 case "layout_marginRight":
+                case "layout_marginEnd":
                     marginRight = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics(), parent, true);
                     break;
                 case "layout_marginBottom":
@@ -393,12 +439,14 @@ public class DynamicLayoutInflator {
                 case "padding":
                     paddingBottom = paddingLeft = paddingRight = paddingTop = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics());
                     break;
+                case "paddingStart":
                 case "paddingLeft":
                     paddingLeft = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics());
                     break;
                 case "paddingTop":
                     paddingTop = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics());
                     break;
+                case "paddingEnd":
                 case "paddingRight":
                     paddingRight = DimensionConverter.stringToDimensionPixelSize(entry.getValue(), view.getResources().getDisplayMetrics());
                     break;
@@ -413,85 +461,6 @@ public class DynamicLayoutInflator {
                     ((RelativeLayout.LayoutParams) layoutParams).addRule(layoutRule, anchor);
                 } else if (entry.getValue().equals("true")) {
                     ((RelativeLayout.LayoutParams) layoutParams).addRule(layoutRule);
-                }
-            }
-        }
-        // TODO: this is a giant mess; come up with a simpler way of deciding what to draw for the background
-        if (attrs.containsKey("background") || attrs.containsKey("borderColor")) {
-            String bgValue = attrs.containsKey("background") ? attrs.get("background") : null;
-            if (bgValue != null && bgValue.startsWith("@drawable/")) {
-                view.setBackground(getDrawableByName(view, bgValue));
-            } else if (bgValue == null || bgValue.startsWith("#") || bgValue.startsWith("@color")) {
-                if (view instanceof Button || attrs.containsKey("pressedColor")) {
-                    int bgColor = parseColor(view, bgValue == null ? "#00000000" : bgValue);
-                    int pressedColor;
-                    if (attrs.containsKey("pressedColor")) {
-                        pressedColor = parseColor(view, attrs.get("pressedColor"));
-                    } else {
-                        pressedColor = adjustBrightness(bgColor, 0.9f);
-                    }
-                    GradientDrawable gd = new GradientDrawable();
-                    gd.setColor(bgColor);
-                    GradientDrawable pressedGd = new GradientDrawable();
-                    pressedGd.setColor(pressedColor);
-                    if (hasCornerRadii) {
-                        float radii[] = new float[8];
-                        for (int i = 0; i < CORNERS.length; i++) {
-                            String corner = CORNERS[i];
-                            if (attrs.containsKey("cornerRadius" + corner)) {
-                                radii[i * 2] = radii[i * 2 + 1] = DimensionConverter.stringToDimension(attrs.get("cornerRadius" + corner), view.getResources().getDisplayMetrics());
-                            }
-                            gd.setCornerRadii(radii);
-                            pressedGd.setCornerRadii(radii);
-                        }
-                    } else if (hasCornerRadius) {
-                        float cornerRadius = DimensionConverter.stringToDimension(attrs.get("cornerRadius"), view.getResources().getDisplayMetrics());
-                        gd.setCornerRadius(cornerRadius);
-                        pressedGd.setCornerRadius(cornerRadius);
-                    }
-                    if (attrs.containsKey("borderColor")) {
-                        String borderWidth = "1dp";
-                        if (attrs.containsKey("borderWidth")) {
-                            borderWidth = attrs.get("borderWidth");
-                        }
-                        int borderWidthPx = DimensionConverter.stringToDimensionPixelSize(borderWidth, view.getResources().getDisplayMetrics());
-                        gd.setStroke(borderWidthPx, parseColor(view, attrs.get("borderColor")));
-                        pressedGd.setStroke(borderWidthPx, parseColor(view, attrs.get("borderColor")));
-                    }
-                    StateListDrawable selector = new StateListDrawable();
-                    selector.addState(new int[]{android.R.attr.state_pressed}, pressedGd);
-                    selector.addState(new int[]{}, gd);
-                    view.setBackground(selector);
-                    getDynamicLayoutInfo(view).bgDrawable = gd;
-                } else if (hasCornerRadius || attrs.containsKey("borderColor")) {
-                    GradientDrawable gd = new GradientDrawable();
-                    int bgColor = parseColor(view, bgValue == null ? "#00000000" : bgValue);
-                    gd.setColor(bgColor);
-                    if (hasCornerRadii) {
-                        float radii[] = new float[8];
-                        for (int i = 0; i < CORNERS.length; i++) {
-                            String corner = CORNERS[i];
-                            if (attrs.containsKey("cornerRadius" + corner)) {
-                                radii[i * 2] = radii[i * 2 + 1] = DimensionConverter.stringToDimension(attrs.get("cornerRadius" + corner), view.getResources().getDisplayMetrics());
-                            }
-                            gd.setCornerRadii(radii);
-                        }
-                    } else if (hasCornerRadius) {
-                        float cornerRadius = DimensionConverter.stringToDimension(attrs.get("cornerRadius"), view.getResources().getDisplayMetrics());
-                        gd.setCornerRadius(cornerRadius);
-                    }
-                    if (attrs.containsKey("borderColor")) {
-                        String borderWidth = "1dp";
-                        if (attrs.containsKey("borderWidth")) {
-                            borderWidth = attrs.get("borderWidth");
-                        }
-                        gd.setStroke(DimensionConverter.stringToDimensionPixelSize(borderWidth, view.getResources().getDisplayMetrics()),
-                                parseColor(view, attrs.get("borderColor")));
-                    }
-                    view.setBackground(gd);
-                    getDynamicLayoutInfo(view).bgDrawable = gd;
-                } else {
-                    view.setBackgroundColor(parseColor(view, bgValue));
                 }
             }
         }
@@ -599,7 +568,7 @@ public class DynamicLayoutInflator {
 
     private static int parseGravity(String value) {
         int gravity = Gravity.NO_GRAVITY;
-        String[] parts = value.toLowerCase().split("[|]");
+        String[] parts = value.toLowerCase(Locale.US).split("[|]");
         for (String part : parts) {
             switch (part) {
                 case "center":
@@ -607,11 +576,11 @@ public class DynamicLayoutInflator {
                     break;
                 case "left":
                 case "textStart":
-                    gravity = gravity | Gravity.LEFT;
+                    gravity = gravity | Gravity.START;
                     break;
                 case "right":
                 case "textEnd":
-                    gravity = gravity | Gravity.RIGHT;
+                    gravity = gravity | Gravity.END;
                     break;
                 case "top":
                     gravity = gravity | Gravity.TOP;
@@ -632,21 +601,23 @@ public class DynamicLayoutInflator {
 
     public static int idNumFromIdString(View view, String id) {
         if (!(view instanceof ViewGroup)) return 0;
+
         Object tag = view.getTag();
-        if (!(tag instanceof DynamicLayoutInfo)) return 0; // not inflated by this class
-        DynamicLayoutInfo info = (DynamicLayoutInfo)view.getTag();
-        if (!info.nameToIdNumber.containsKey(id)) {
-            ViewGroup grp = (ViewGroup)view;
-            for (int i = 0; i < grp.getChildCount(); i++) {
-                int val = idNumFromIdString(grp.getChildAt(i), id);
-                if (val != 0) return val;
+        if (tag instanceof DynamicLayoutInfo) {
+            DynamicLayoutInfo info = (DynamicLayoutInfo)tag;
+            if (info.nameToIdNumber.containsKey(id)){
+                return info.nameToIdNumber.get(id);
             }
-            return 0;
         }
-        return info.nameToIdNumber.get(id);
+
+        ViewGroup grp = (ViewGroup)view;
+        for (int i = 0; i < grp.getChildCount(); i++) {
+            int val = idNumFromIdString(grp.getChildAt(i), id);
+            if (val != 0) return val;
+        }
+        return 0;
     }
 
-    @Nullable
     public static View findViewByIdString(View view, String id) {
         int idNum = idNumFromIdString(view, id);
         if (idNum == 0) return null;
@@ -654,9 +625,18 @@ public class DynamicLayoutInflator {
     }
 
     public static int parseColor(View view, String text) {
+        /*
         if (text.startsWith("@color/")) {
             Resources resources = view.getResources();
             return resources.getColor(resources.getIdentifier(text.substring("@color/".length()), "color", view.getContext().getPackageName()));
+        }
+        */
+        if (text.startsWith("@android:color/")) {
+            initAndroidColorMapIfNeeded();
+            String colorName = text.substring(15);
+            Integer buildinColor = androidColorMap.get(colorName);
+            if (buildinColor == null) return android.R.color.white;
+            return buildinColor.intValue();
         }
         if (text.length() == 4 && text.startsWith("#")) {
             text = "#" + text.charAt(1) + text.charAt(1) + text.charAt(2) + text.charAt(2) + text.charAt(3) + text.charAt(3);
@@ -687,7 +667,7 @@ public class DynamicLayoutInflator {
             public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
                 if (view instanceof ImageView) {
                     ImageView.ScaleType scaleType = ((ImageView)view).getScaleType();
-                    switch (value.toLowerCase()) {
+                    switch (value.toLowerCase(Locale.US)) {
                         case "center":
                             scaleType = ImageView.ScaleType.CENTER;
                             break;
@@ -779,7 +759,7 @@ public class DynamicLayoutInflator {
                     }
                     view.setTextAlignment(alignment);
                 } else {
-                    int gravity = Gravity.LEFT;
+                    int gravity = Gravity.START;
                     switch (value) {
                         case "center":
                             gravity = Gravity.CENTER;
@@ -789,7 +769,7 @@ public class DynamicLayoutInflator {
                             break;
                         case "right":
                         case "textEnd":
-                            gravity = Gravity.RIGHT;
+                            gravity = Gravity.END;
                             break;
                     }
                     ((TextView)view).setGravity(gravity);
@@ -893,7 +873,7 @@ public class DynamicLayoutInflator {
             @Override
             public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
                 int visibility = View.VISIBLE;
-                String visValue = value.toLowerCase();
+                String visValue = value.toLowerCase(Locale.US);
                 if (visValue.equals("gone")) visibility = View.GONE;
                 else if (visValue.equals("invisible")) visibility = View.INVISIBLE;
                 view.setVisibility(visibility);
@@ -916,6 +896,89 @@ public class DynamicLayoutInflator {
             @Override
             public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
                 view.setOnClickListener(getClickListener(parent, value));
+            }
+        });
+        viewRunnables.put("style", new ViewParamRunnable() {
+            @Override
+            @SuppressLint("ResourceType")
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                if (view instanceof TextView) {
+                    switch (value) {
+                        case "?android:attr/textAppearanceLarge":
+                            ((TextView)view).setTextAppearance(view.getContext(),
+                                    android.R.attr.textAppearanceLarge);
+                            break;
+                    }
+
+                }
+            }
+        });
+        viewRunnables.put("background", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                // background drawable is not support
+
+                // default parse color constant
+                // and the background color should not reference outer value
+                int color = parseColor(view, value);
+                view.setBackgroundColor(color);
+            }
+        });
+        viewRunnables.put("translationY", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                // don't support the form of x%
+                int translate = DimensionConverter.stringToDimensionPixelSize(value, view.getResources().getDisplayMetrics());
+                view.setTranslationY(translate);
+
+            }
+        });
+        viewRunnables.put("progressDrawable", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                if (view instanceof ProgressBar) {
+                    int color = parseColor(view, value);
+                    ((ProgressBar)view).setProgressDrawable(new ColorDrawable(color));
+                }
+            }
+        });
+        viewRunnables.put("focusable", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                if (value.equals("true")) {
+                    view.setFocusable(true);
+                } else {
+                    view.setFocusable(false);
+                }
+            }
+        });
+        viewRunnables.put("focusableInTouchMode", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                if (value.equals("true")) {
+                    view.setFocusableInTouchMode(true);
+                } else {
+                    view.setFocusableInTouchMode(false);
+                }
+            }
+        });
+        viewRunnables.put("weightSum", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                if (view instanceof  LinearLayout) {
+                    float weightSum = Float.parseFloat(value);
+                    ((LinearLayout)view).setWeightSum(weightSum);
+                }
+            }
+        });
+        viewRunnables.put("maxWidth", new ViewParamRunnable() {
+            @Override
+            public void apply(View view, String value, ViewGroup parent, Map<String, String> attrs) {
+                if (view instanceof TextView) {
+                    int maxWidth = DimensionConverter.stringToDimensionPixelSize(value,
+                            view.getResources().getDisplayMetrics(), parent, false);
+                    ((TextView)view).setMaxWidth(maxWidth);
+                }
             }
         });
     }
